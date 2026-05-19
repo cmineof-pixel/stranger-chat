@@ -1,0 +1,88 @@
+name: StrangerChat AI Agent
+
+on:
+  schedule:
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+
+jobs:
+  ai-moderation-check:
+    runs-on: ubuntu-latest
+    name: Toxic Content & Bug Scanner
+    steps:
+      - name: Code checkout karo
+        uses: actions/checkout@v4
+
+      - name: Node.js setup karo
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Dependencies install karo
+        run: npm install || echo "No package.json, skipping"
+
+      - name: AI Scanner chalao
+        run: |
+          cat > scanner.js << 'SCRIPT'
+          const fs = require('fs');
+          const path = require('path');
+          console.log("StrangerChat AI Agent Start...\n");
+          function scanFiles(dir) {
+            let results = { issues: [], files: 0 };
+            function walk(currentDir) {
+              if (!fs.existsSync(currentDir)) return;
+              const items = fs.readdirSync(currentDir);
+              for (const item of items) {
+                const fullPath = path.join(currentDir, item);
+                const stat = fs.statSync(fullPath);
+                if (stat.isDirectory() && !item.startsWith('.') && item !== 'node_modules') {
+                  walk(fullPath);
+                } else if (item.endsWith('.html') || item.endsWith('.js')) {
+                  results.files++;
+                  const content = fs.readFileSync(fullPath, 'utf8');
+                  const checks = [
+                    { pattern: /innerHTML\s*=\s*[^'"]/g, issue: 'XSS Risk', severity: 'HIGH' },
+                    { pattern: /eval\s*\(/g, issue: 'eval() use ho raha hai', severity: 'HIGH' },
+                    { pattern: /console\.log\s*\(/g, issue: 'Debug code hai', severity: 'LOW' },
+                    { pattern: /http:\/\//g, issue: 'HTTP hai HTTPS nahi', severity: 'MEDIUM' },
+                    { pattern: /password\s*=\s*['"]/gi, issue: 'Hardcoded password!', severity: 'CRITICAL' },
+                    { pattern: /api_key\s*=\s*['"]/gi, issue: 'Hardcoded API key!', severity: 'CRITICAL' },
+                  ];
+                  for (const check of checks) {
+                    const matches = content.match(check.pattern);
+                    if (matches) {
+                      results.issues.push({ file: fullPath.replace(process.cwd() + '/', ''), issue: check.issue, severity: check.severity, count: matches.length });
+                    }
+                  }
+                }
+              }
+            }
+            walk(dir);
+            return results;
+          }
+          const results = scanFiles('.');
+          console.log(results.files + " files scan kiye\n");
+          if (results.issues.length === 0) {
+            console.log("Koi issue nahi! Website safe hai.");
+          } else {
+            console.log(results.issues.length + " issues mile:");
+            results.issues.forEach(i => console.log("[" + i.severity + "] " + i.file + ": " + i.issue));
+          }
+          console.log("\nStrangerChat AI Agent complete!");
+          SCRIPT
+          node scanner.js
+
+      - name: Report save karo
+        run: |
+          echo "# AI Report - $(date '+%Y-%m-%d')" > SCAN_REPORT.md
+          node scanner.js >> SCAN_REPORT.md 2>&1 || true
+
+      - name: Commit karo
+        run: |
+          git config --global user.email "ai-agent@strangerchat.app"
+          git config --global user.name "StrangerChat AI Agent"
+          git add SCAN_REPORT.md
+          git diff --staged --quiet || git commit -m "AI Agent Daily Report - $(date '+%Y-%m-%d')"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
